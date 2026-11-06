@@ -7,12 +7,17 @@ jobs:
   setup-roblox-rdp:
     runs-on: windows-latest
     
-    # Remove o timeout padrão de 6 horas do GitHub
     timeout-minutes: 0 
     
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Ensure Tailscale Service is Running
+        run: |
+          Write-Host "Garantindo que o serviço Tailscale está ativo..."
+          Start-Service tailscaled
+          Write-Host "Serviço Tailscale iniciado."
 
       - name: Authenticate Tailscale
         env:
@@ -20,11 +25,35 @@ jobs:
         run: |
           if ($env:TAILSCALE_AUTH_KEY) {
             Write-Host "Autenticando com chave..."
+            # --reset limpa configurações antigas para evitar conflitos
             tailscale up --authkey=$env:TAILSCALE_AUTH_KEY --hostname="roblox-rdp-${{ github.run_number }}" --reset
           } else {
-            Write-Host "Chave não encontrada. Iniciando serviço..."
-            Start-Service tailscaled
+            Write-Host "Chave não encontrada. Iniciando modo manual..."
             tailscale up --advertise-tags=tag:ci-runner
+          }
+
+      - name: Wait for Connection to Stabilize
+        shell: pwsh
+        run: |
+          Write-Host "Aguardando conexão Tailscale ficar saudável..."
+          $maxAttempts = 60 # Espera até 5 minutos
+          $attempt = 0
+          
+          while ($attempt -lt $maxAttempts) {
+              try {
+                  # Verifica o status via API local do Tailscale
+                  $status = Invoke-RestMethod -Uri "http://100.100.100.100/v3/status" -ErrorAction Stop
+                  
+                  if ($status.Self.Status -eq "Running") {
+                      Write-Host "Conexão estabelecida!"
+                      break
+                  }
+              } catch {
+                  Write-Host "Aguardando conexão... (Tentativa $($attempt + 1))"
+              }
+              
+              Start-Sleep -Seconds 5
+              $attempt++
           }
 
       - name: Configure Remote Desktop & Power
@@ -47,42 +76,20 @@ jobs:
           
           Write-Host "RDP e Energia configurados."
 
-      - name: Wait and Get IP
+      - name: Get IP via Local API
         id: get-ip
         shell: pwsh
         run: |
-          Write-Host "Aguardando conexão Tailscale estabilizar..."
-          $ip = $null
-          $attempts = 0
-          $maxAttempts = 30 
-          
-          while ($null -eq $ip -and $attempts -lt $maxAttempts) {
-              Start-Sleep -Seconds 5
-              $iface = Get-NetAdapter | Where-Object {
-                  $_.Name -like "*tailscale*" -or 
-                  $_.InterfaceDescription -like "*tailscale*" -or
-                  $_.Name -like "*Tailnet*"
-              }
-              
-              if ($iface) {
-                  try {
-                      $ipAddressObj = Get-NetIPAddress -InterfaceIndex $iface.ifIndex -AddressFamily IPv4 -ErrorAction Stop
-                      if ($ipAddressObj.IPAddress -and $ipAddressObj.IPAddress -ne "0.0.0.0") {
-                          $ip = $ipAddressObj.IPAddress
-                      }
-                  } catch {}
-              }
-              $attempts++
-          }
-
-          if ($null -eq $ip) {
-              Write-Warning "Falha ao obter IP automático."
+          Write-Host "Obtendo IP via API local do Tailscale..."
+          try {
+              $ip = Invoke-RestMethod -Uri "http://100.100.100.100/v3/ip" -ErrorAction Stop
+              echo "IP_TAILNET=$ip" >> $env:GITHUB_ENV
+              Write-Host "::set-output name=ip::$ip"
+              Write-Host "IP Obtido: $ip"
+          } catch {
+              Write-Error "Falha ao obter IP pela API local."
               exit 1
           }
-
-          echo "IP_TAILNET=$ip" >> $env:GITHUB_ENV
-          Write-Host "::set-output name=ip::$ip"
-          Write-Host "IP Obtido: $ip"
 
       - name: Display Connection Info
         run: |
@@ -99,16 +106,14 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "Iniciando loop infinito de heartbeat..."
-          Write-Host "Este runner manterá o job vivo indefinidamente."
           
           while ($true) {
               try {
                   gh actions heartbeat
                   Write-Host "$(Get-Date): Heartbeat enviado."
               } catch {
-                  Write-Warning "Falha no heartbeat, tentando reconectar..."
+                  Write-Warning "Falha no heartbeat."
               }
               
-              # Espera 4 minutos (240 segundos) antes do próximo ping
               Start-Sleep -Seconds 240
           }
