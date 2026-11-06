@@ -1,45 +1,137 @@
-name: Windows Cloud PC - Anydesk Melhorado
+name: Setup Roblox RDP + Tailscale (Infinito)
+
 on:
-workflow_dispatch:
+  workflow_dispatch: # Execute manualmente via botão na aba Actions
+
 jobs:
-build:
-name: Iniciando Sistema Reforçado
-runs-on: windows-latest
-timeout-minutes: 10080
-env:
-PROCESSOR_COUNT: 8
-OPENGL: "1"
-GITHUB_PRESERVE_WORKFLOW: true
-MEMORY_GB: 16
-steps:
-- name: Baixar e Instalar Essenciais
-run: |
-Invoke-WebRequest -Uri "https://www.dropbox.com/scl/fi/7eiczvgil84czu55dxep3/Downloads.bat?rlkey=wzdc1wxjsph2b7r0atplmdz3p&dl=1" -OutFile "Downloads.bat" -UseBasicParsing
-cmd /c Downloads.bat
-- name: Iniciar AnyDesk
-run: |
-if (Test-Path "start.bat") {
-cmd /c start.bat
-Start-Sleep -Seconds 10
-} else {
-Write-Host "ERRO: Arquivo start.bat não encontrado — verifique o download."
-exit 1
-}
-- name: Monitoramento Contínuo e Reinício Automático
-run: |
-while ($true) {
-$anydesk = Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue
-if (-not $anydesk -or $anydesk.HasExited) {
-Write-Host "Reiniciando AnyDesk..."
-cmd /c start.bat
-}
-Start-Sleep -Seconds 60
-}
-- name: Manter Sistema Ativo
-run: |
-Start-Sleep -Seconds 604800
-- name: Limpeza Segura
-if: always()
-run: |
-Remove-Item Downloads.bat -Force -ErrorAction SilentlyContinue
-Write-Host "Limpeza finalizada."
+  setup-roblox-rdp:
+    runs-on: windows-latest
+    
+    # Remove o timeout padrão de 6 horas do GitHub
+    timeout-minutes: 0 
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Latest Tailscale
+        run: |
+          Write-Host "Baixando última versão estável do Tailscale..."
+          $apiUrl = "https://pkgs.tailscale.com/stable/?os=windows&arch=amd64"
+          try {
+              $response = Invoke-WebRequest -Uri $apiUrl -Method Head -UseBasicParsing -ErrorAction Stop
+              $installerUrl = $response.Headers["Location"]
+              if (-not $installerUrl) { throw "URL não encontrado." }
+          } catch {
+              $installerUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.78.2-amd64.msi" 
+          }
+
+          $path = "$env:TEMP\tailscale-installer.msi"
+          Invoke-WebRequest -Uri $installerUrl -OutFile $path
+          
+          Write-Host "Instalando Tailscale..."
+          Start-Process msiexec.exe -ArgumentList "/i", $path, "/quiet", "/norestart", "REBOOT=ReallySuppress" -Wait
+          Remove-Item $path -Force -ErrorAction SilentlyContinue
+          Write-Host "Tailscale instalado com sucesso."
+
+      - name: Authenticate Tailscale
+        env:
+          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          if ($env:TAILSCALE_AUTH_KEY) {
+            Write-Host "Autenticando com chave..."
+            tailscale up --authkey=$env:TAILSCALE_AUTH_KEY --hostname="roblox-rdp-${{ github.run_number }}" --reset
+          } else {
+            Write-Host "Chave não encontrada. Iniciando serviço..."
+            Start-Service tailscaled
+            tailscale up --advertise-tags=tag:ci-runner
+          }
+
+      - name: Configure Remote Desktop & Power
+        shell: pwsh
+        run: |
+          Write-Host "Configurando RDP e Energia..."
+          
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          
+          # Habilita Ultimate Performance se não existir
+          powercfg /list | Select-String "Ultimate Performance" -Quiet | Out-Null
+          if (-not $?) {
+              powercfg -duplicatescheme e9a42b02-d5df-448d-aa00-03f14749eb99
+          }
+          
+          # Ativa perfil de alta performance
+          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+          powercfg /hibernate off
+          
+          Write-Host "RDP e Energia configurados."
+
+      - name: Wait and Get IP
+        id: get-ip
+        shell: pwsh
+        run: |
+          Write-Host "Aguardando conexão Tailscale estabilizar..."
+          $ip = $null
+          $attempts = 0
+          $maxAttempts = 30 
+          
+          while ($null -eq $ip -and $attempts -lt $maxAttempts) {
+              Start-Sleep -Seconds 5
+              $iface = Get-NetAdapter | Where-Object {
+                  $_.Name -like "*tailscale*" -or 
+                  $_.InterfaceDescription -like "*tailscale*" -or
+                  $_.Name -like "*Tailnet*"
+              }
+              
+              if ($iface) {
+                  try {
+                      $ipAddressObj = Get-NetIPAddress -InterfaceIndex $iface.ifIndex -AddressFamily IPv4 -ErrorAction Stop
+                      if ($ipAddressObj.IPAddress -and $ipAddressObj.IPAddress -ne "0.0.0.0") {
+                          $ip = $ipAddressObj.IPAddress
+                      }
+                  } catch {}
+              }
+              $attempts++
+          }
+
+          if ($null -eq $ip) {
+              Write-Warning "Falha ao obter IP automático."
+              exit 1
+          }
+
+          echo "IP_TAILNET=$ip" >> $env:GITHUB_ENV
+          Write-Host "::set-output name=ip::$ip"
+          Write-Host "IP Obtido: $ip"
+
+      - name: Display Connection Info
+        run: |
+          echo "=========================================="
+          echo "CONFIGURAÇÃO CONCLUÍDA - MODO INFINITO ATIVO"
+          echo "=========================================="
+          echo "IP Tailscale: ${{ steps.get-ip.outputs.ip }}"
+          echo "Usuário: github-actions"
+          echo "Plano de Energia: Ultimate Performance"
+          echo "Hibernação: Desativada"
+          echo "=========================================="
+
+      - name: Infinite Heartbeat Loop
+        shell: pwsh
+        run: |
+          Write-Host "Iniciando loop infinito de heartbeat..."
+          Write-Host "Este runner manterá o job vivo indefinidamente."
+          
+          while ($true) {
+              try {
+                  # O comando gh actions heartbeat diz ao GitHub: 
+                  # "Ei, eu ainda estou vivo e trabalhando!"
+                  gh actions heartbeat
+                  Write-Host "$(Get-Date): Heartbeat enviado."
+              } catch {
+                  Write-Warning "Falha no heartbeat, tentando reconectar..."
+              }
+              
+              # Espera 4 minutos (240 segundos) antes do próximo ping
+              # O GitHub cancela jobs inativos após 5 minutos.
+              Start-Sleep -Seconds 240
+          }
