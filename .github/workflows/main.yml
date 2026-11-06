@@ -14,26 +14,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Latest Tailscale
-        run: |
-          Write-Host "Baixando última versão estável do Tailscale..."
-          $apiUrl = "https://pkgs.tailscale.com/stable/?os=windows&arch=amd64"
-          try {
-              $response = Invoke-WebRequest -Uri $apiUrl -Method Head -UseBasicParsing -ErrorAction Stop
-              $installerUrl = $response.Headers["Location"]
-              if (-not $installerUrl) { throw "URL não encontrado." }
-          } catch {
-              $installerUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.78.2-amd64.msi" 
-          }
-
-          $path = "$env:TEMP\tailscale-installer.msi"
-          Invoke-WebRequest -Uri $installerUrl -OutFile $path
-          
-          Write-Host "Instalando Tailscale..."
-          Start-Process msiexec.exe -ArgumentList "/i", $path, "/quiet", "/norestart", "REBOOT=ReallySuppress" -Wait
-          Remove-Item $path -Force -ErrorAction SilentlyContinue
-          Write-Host "Tailscale instalado com sucesso."
-
       - name: Authenticate Tailscale
         env:
           TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
@@ -123,8 +103,6 @@ jobs:
           
           while ($true) {
               try {
-                  # O comando gh actions heartbeat diz ao GitHub: 
-                  # "Ei, eu ainda estou vivo e trabalhando!"
                   gh actions heartbeat
                   Write-Host "$(Get-Date): Heartbeat enviado."
               } catch {
@@ -132,6 +110,5 @@ jobs:
               }
               
               # Espera 4 minutos (240 segundos) antes do próximo ping
-              # O GitHub cancela jobs inativos após 5 minutos.
               Start-Sleep -Seconds 240
           }
