@@ -30,41 +30,31 @@ jobs:
           $anydeskExe = "${{ env.ANYDESK_EXE }}"
           $dir = "${{ env.ANYDESK_DIR }}"
           
-          # 1. Verifica existência
+          # Verifica se o AnyDesk está instalado
           if (-not (Test-Path $anydeskExe)) {
               Write-Error "❌ ERRO: AnyDesk não encontrado em $anydeskExe"
               exit 1
           }
 
-          # 2. Cria estrutura obrigatória para rodar headless
-          New-Item -ItemType Directory -Force -Path "$dir\data" | Out-Null
-          New-Item -ItemType File -Force -Path "$dir\user.conf" | Out-Null
-
-          # 3. Define ID Fixo se fornecido
-          if ("${{ github.event.inputs.anydesk_id }}" -ne "") {
-              Write-Host "Configurando ID Fixo..."
-              "id=${{ github.event.inputs.anydesk_id }}" | Out-File -FilePath "$dir\user.conf" -Encoding ascii
-          } else {
-              Write-Host "ID aleatório será gerado."
-          }
-
-          # 4. Mata qualquer processo órfão
+          # Limpa processos antigos
           Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
-
-          # 5. Inicia via CMD para evitar bloqueios do PowerShell
-          Start-Process cmd.exe -ArgumentList "/c", "`"$anydeskExe`" --daemon" -WindowStyle Hidden
-
-          Write-Host "Aguardando inicialização completa..."
-          Start-Sleep -Seconds 30
-
-          # 6. Validação crítica
-          $pid = Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue
-          if ($pid) {
-              Write-Host "✅ Daemon iniciado com sucesso (PID: $($pid.Id))"
+          
+          # Define ID Fixo se fornecido
+          if ("${{ github.event.inputs.anydesk_id }}" -ne "") {
+              Write-Host "Definindo ID Fixo: ${{ github.event.inputs.anydesk_id }}"
+              Set-Content -Path "$dir\user.conf" -Value "id=${{ github.event.inputs.anydesk_id }}" -Encoding ascii
           } else {
-              Write-Error "❌ FALHA CRÍTICA: O daemon do AnyDesk morreu imediatamente após iniciar."
-              exit 1
+              Write-Host "Gerando ID Aleatório..."
+              if (Test-Path "$dir\user.conf") {
+                  Remove-Item "$dir\user.conf" -Force
+              }
           }
+
+          # INICIA O DAEMON
+          Start-Process $anydeskExe -ArgumentList "--daemon", "--minimized" -WindowStyle Hidden -WorkingDirectory $dir
+          
+          Write-Host "Aguardando inicialização..."
+          Start-Sleep -Seconds 25
 
       - name: 🔍 Verificar Status
         run: |
@@ -74,35 +64,57 @@ jobs:
               Write-Host "✅ AnyDesk Daemon está RODANDO (PID: $($pid.Id))"
               
               $configFile = "${{ env.ANYDESK_DIR }}\user.conf"
+              $retrievedId = ""
+              
               if (Test-Path $configFile) {
-                  $content = Get-Content $configFile
+                  $content = Get-Content $configFile -Raw
                   if ($content -match "id=(.+)") {
-                      $id = $matches[1]
-                      Write-Host "🆔 Seu AnyDesk ID é: $id"
-                  } else {
-                      Write-Host "⚠️ ID não encontrado ainda."
+                      $retrievedId = $matches[1]
                   }
+              }
+
+              if ("${{ github.event.inputs.anydesk_id }}" -eq "" -and $retrievedId -eq "") {
+                  Start-Sleep -Seconds 5
+                  if (Test-Path $configFile) {
+                       $newContent = Get-Content $configFile -Raw
+                       if ($newContent -match "id=(.+)") {
+                           $retrievedId = $matches[1]
+                       }
+                  }
+              }
+
+              if ($retrievedId -ne "") {
+                  Write-Host "🆔 Seu AnyDesk ID é: $retrievedId"
+              } else {
+                  Write-Host "⚠️ ID não encontrado ainda."
               }
           } else {
               Write-Host "❌ ERRO: Processo não iniciou."
               exit 1
           }
 
-      - name: 🛡️ Monitoramento Contínuo
+      - name: 🛡️ Monitoramento Contínuo (7 Dias)
         run: |
-          Write-Host "=== MONITORAMENTO ATIVO ==="
-          while ($true) {
+          Write-Host "=== MONITORAMENTO ATIVO (Alvo: 7 Dias) ==="
+          # 7 dias = 604.800 segundos. Como o loop roda a cada ~10s, são 60.480 loops.
+          $maxLoops = 60480 
+          $loopCount = 0
+          
+          while ($loopCount -lt $maxLoops) {
+              $loopCount++
               $process = Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue
               $portOpen = $false
               
+              # 1. Verifica se o processo existe
               if (-not $process -or $process.HasExited) {
-                  Write-Host "⚠️ Reiniciando..."
+                  Write-Host "⚠️ [Loop $loopCount/$maxLoops] Processo não encontrado. Reiniciando..."
                   Start-Sleep -Seconds 5
                   Start-Process "${{ env.ANYDESK_EXE }}" -ArgumentList "--daemon", "--minimized" -WindowStyle Hidden -WorkingDirectory "${{ env.ANYDESK_DIR }}"
                   Start-Sleep -Seconds 10
                   continue
               }
 
+              # 2. Verifica se a porta 7070 está aberta
               try {
                   $tcpClient = New-Object System.Net.Sockets.TcpClient
                   $connect = $tcpClient.BeginConnect("127.0.0.1", 7070, $null, $null)
@@ -114,23 +126,18 @@ jobs:
               } catch {}
 
               if (-not $portOpen) {
-                  Write-Host "⚠️ Porta fechada. Reiniciando serviço..."
+                  Write-Host "⚠️ [Loop $loopCount/$maxLoops] Porta 7070 fechada. Reiniciando serviço..."
                   Stop-Process -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
                   Start-Sleep -Seconds 5
                   Start-Process "${{ env.ANYDESK_EXE }}" -ArgumentList "--daemon", "--minimized" -WindowStyle Hidden -WorkingDirectory "${{ env.ANYDESK_DIR }}"
+                  Start-Sleep -Seconds 10
               } else {
-                  Write-Host "✅ AnyDesk saudável."
+                  # Log leve a cada 1 hora (aproximadamente 360 loops) para não spammar
+                  if ($loopCount % 360 -eq 0) {
+                      Write-Host "✅ [Loop $loopCount/$maxLoops] AnyDesk está saudável (1h passada)."
+                  }
+                  Start-Sleep -Seconds 10
               }
-
-              Start-Sleep -Seconds 30
           }
-
-      - name: ⏳ Manter Ativo
-        run: |
-          Start-Sleep -Seconds 604800
-
-      - name: 🧹 Limpeza Final
-        if: always()
-        run: |
-          Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
-          Write-Host "Limpeza finalizada."
+          
+          Write-Host "=== FIM DO MONITORAMENTO (7 Dias concluídos) ==="
