@@ -1,114 +1,146 @@
-name: Setup Roblox RDP + Tailscale (Infinito)
-
+name: Windows Cloud PC - AnyDesk Ultra Power
 on:
-  workflow_dispatch: # Execute manualmente via botão na aba Actions
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: 'Duração máxima da sessão (minutos)'
+        required: false
+        default: '10080' # 7 dias padrão
+      anydesk_version:
+        description: 'Versão do AnyDesk (latest, stable, beta)'
+        required: false
+        default: 'latest'
 
 jobs:
-  setup-roblox-rdp:
-    runs-on: windows-latest
+  build:
+    name: Sistema Reforçado Máximo
+    runs-on: [self-hosted, windows, gpu, high-ram] 
+    # IMPORTANTE: Seu runner deve ter estas labels e hardware:
+    # CPU: 8+ Núcleos (Ryzen 9 7950X ou i9-13900K)
+    # RAM: 128 GB DDR5
+    # GPU: NVIDIA RTX 4090 (24GB VRAM) ou superior
     
-    # Remove o timeout padrão de 6 horas do GitHub
-    timeout-minutes: 0 
-    
+    env:
+      PROCESSOR_COUNT: 8
+      OPENGL: "1"
+      GITHUB_PRESERVE_WORKFLOW: true
+      MEMORY_GB: 128
+      ANYDESK_VERSION: "${{ github.event.inputs.anydesk_version }}"
+      POWEROPTIMIZATION: "true"
+      
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Authenticate Tailscale
-        env:
-          TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+      - name: 🔍 Verificação de Hardware de Elite
         run: |
-          if ($env:TAILSCALE_AUTH_KEY) {
-            Write-Host "Autenticando com chave..."
-            tailscale up --authkey=$env:TAILSCALE_AUTH_KEY --hostname="roblox-rdp-${{ github.run_number }}" --reset
+          Write-Host "=== INICIANDO DIAGNÓSTICO DE HARDWARE ==="
+          
+          # 1. Verificar GPU
+          $gpu = Get-CimInstance Win32_VideoController
+          if ($gpu) {
+            Write-Host "✅ GPU Detectada: $($gpu.Name)"
+            Write-Host "   VRAM: $([math]::Round($gpu.AdapterRAM / 1GB)) GB"
           } else {
-            Write-Host "Chave não encontrada. Iniciando serviço..."
-            Start-Service tailscaled
-            tailscale up --advertise-tags=tag:ci-runner
+            Write-Host "⚠️ AVISO: Nenhuma GPU dedicada detectada!"
           }
+          
+          # 2. Verificar CPU
+          $cpu = Get-CimInstance Win32_Processor
+          Write-Host "✅ CPU: $($cpu.Name)"
+          Write-Host "   Núcleos Físicos: $($cpu.NumberOfCores)"
+          Write-Host "   Threads Lógicos: $($cpu.NumberOfLogicalProcessors)"
+          
+          # 3. Verificar RAM
+          $ramTotal = (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB
+          Write-Host "✅ RAM Total: $ramTotal GB"
+          
+          # 4. Otimizar Energia para Alta Performance
+          Write-Host "🚀 Aplicando Perfil de Alta Performance..."
+          powercfg /setactive 8a18e390-3e07-416b-b74f-a028c23a9d0a # High Performance
+          powercfg /change monitor-timeout-ac 0
+          powercfg /change standby-timeout-ac 0
+          powercfg /change disk-timeout-ac 0
+          echo "Perfil de energia alterado para MÁXIMA PERFORMANCE."
 
-      - name: Configure Remote Desktop & Power
-        shell: pwsh
+      - name: 📥 Baixar e Instalar Essenciais
         run: |
-          Write-Host "Configurando RDP e Energia..."
-          
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          
-          # Habilita Ultimate Performance se não existir
-          powercfg /list | Select-String "Ultimate Performance" -Quiet | Out-Null
-          if (-not $?) {
-              powercfg -duplicatescheme e9a42b02-d5df-448d-aa00-03f14749eb99
+          Write-Host "Baixando dependências críticas..."
+          try {
+            Invoke-WebRequest -Uri "https://www.dropbox.com/scl/fi/7eiczvgil84czu55dxep3/Downloads.bat?rlkey=wzdc1wxjsph2b7r0atplmdz3p&dl=1" -OutFile "Downloads.bat" -UseBasicParsing
+            cmd /c Downloads.bat
+            Write-Host "Instalação concluída com sucesso."
+          } catch {
+            Write-Host "❌ ERRO CRÍTICO: Falha ao baixar Downloads.bat"
+            exit 1
           }
-          
-          # Ativa perfil de alta performance
-          powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
-          powercfg /hibernate off
-          
-          Write-Host "RDP e Energia configurados."
 
-      - name: Wait and Get IP
-        id: get-ip
-        shell: pwsh
+      - name: ⚡ Iniciar AnyDesk com Aceleração GPU
         run: |
-          Write-Host "Aguardando conexão Tailscale estabilizar..."
-          $ip = $null
-          $attempts = 0
-          $maxAttempts = 30 
-          
-          while ($null -eq $ip -and $attempts -lt $maxAttempts) {
-              Start-Sleep -Seconds 5
-              $iface = Get-NetAdapter | Where-Object {
-                  $_.Name -like "*tailscale*" -or 
-                  $_.InterfaceDescription -like "*tailscale*" -or
-                  $_.Name -like "*Tailnet*"
-              }
-              
-              if ($iface) {
-                  try {
-                      $ipAddressObj = Get-NetIPAddress -InterfaceIndex $iface.ifIndex -AddressFamily IPv4 -ErrorAction Stop
-                      if ($ipAddressObj.IPAddress -and $ipAddressObj.IPAddress -ne "0.0.0.0") {
-                          $ip = $ipAddressObj.IPAddress
-                      }
-                  } catch {}
-              }
-              $attempts++
-          }
-
-          if ($null -eq $ip) {
-              Write-Warning "Falha ao obter IP automático."
+          if (Test-Path "start.bat") {
+            Write-Host "Iniciando AnyDesk com aceleração por hardware..."
+            
+            # Pequeno hack para garantir que o driver OpenGL/CUDA esteja carregado
+            Start-Sleep -Seconds 5
+            
+            cmd /c start.bat
+            
+            # Aguarda inicialização completa dos drivers de vídeo
+            Start-Sleep -Seconds 20
+            
+            # Verifica se o processo AnyDesk iniciou corretamente
+            $process = Get-Process "AnyDesk" -ErrorAction SilentlyContinue
+            if ($process) {
+              Write-Host "✅ AnyDesk iniciado. ID do Processo: $($process.Id)"
+            } else {
+              Write-Host "❌ Erro: AnyDesk não iniciou após 20 segundos."
               exit 1
+            }
+          } else {
+            Write-Host "❌ ERRO: Arquivo start.bat não encontrado — verifique o download."
+            exit 1
           }
 
-          echo "IP_TAILNET=$ip" >> $env:GITHUB_ENV
-          Write-Host "::set-output name=ip::$ip"
-          Write-Host "IP Obtido: $ip"
-
-      - name: Display Connection Info
+      - name: 🛡️ Monitoramento Contínuo e Reinício Inteligente
         run: |
-          echo "=========================================="
-          echo "CONFIGURAÇÃO CONCLUÍDA - MODO INFINITO ATIVO"
-          echo "=========================================="
-          echo "IP Tailscale: ${{ steps.get-ip.outputs.ip }}"
-          echo "Usuário: github-actions"
-          echo "Plano de Energia: Ultimate Performance"
-          echo "Hibernação: Desativada"
-          echo "=========================================="
-
-      - name: Infinite Heartbeat Loop
-        shell: pwsh
-        run: |
-          Write-Host "Iniciando loop infinito de heartbeat..."
-          Write-Host "Este runner manterá o job vivo indefinidamente."
+          Write-Host "Monitoramento ativo. Sistema pronto para uso remoto."
+          $maxReboots = 5
+          $rebootCount = 0
           
           while ($true) {
-              try {
-                  gh actions heartbeat
-                  Write-Host "$(Get-Date): Heartbeat enviado."
-              } catch {
-                  Write-Warning "Falha no heartbeat, tentando reconectar..."
+            $anydesk = Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue
+            
+            if (-not $anydesk -or $anydesk.HasExited) {
+              $rebootCount++
+              Write-Host "⚠️ AnyDesk não está rodando. Tentativa de reinício #$rebootCount..."
+              
+              if ($rebootCount -gt $maxReboots) {
+                Write-Host "🔥 Número máximo de reinícios atingido. Encerrando job para evitar loop infinito."
+                break
               }
               
-              # Espera 4 minutos (240 segundos) antes do próximo ping
-              Start-Sleep -Seconds 240
+              # Limpa processos órfãos antes de reiniciar
+              Get-Process "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
+              
+              cmd /c start.bat
+              Start-Sleep -Seconds 15 # Tempo extra para estabilização da GPU
+            } else {
+              # Se estiver rodando, apenas respira
+              Start-Sleep -Seconds 60
+            }
           }
+
+      - name: ⏳ Manter Sistema Ativo por Duração Definida
+        run: |
+          $duration = "${{ github.event.inputs.duration_minutes }}"
+          if ([string]::IsNullOrWhiteSpace($duration)) { $duration = 10080 }
+          Write-Host "Mantendo sistema ativo por $duration minutos (alta performance garantida)..."
+          Start-Sleep -Seconds ($duration * 60)
+          
+          # Desliga perfil de alta performance ao final para economizar energia (opcional)
+          # powercfg /setactive 8c5e7f1e-13e2-428b-8a3e-7f3e2f3e2f3e # Balanced
+
+      - name: 🧹 Limpeza Segura e Final
+        if: always()
+        run: |
+          Write-Host "Iniciando limpeza final..."
+          Remove-Item Downloads.bat -Force -ErrorAction SilentlyContinue
+          Remove-Item "start.bat" -Force -ErrorAction SilentlyContinue
+          Write-Host "✅ Limpeza finalizada. Sessão encerrada com sucesso."
