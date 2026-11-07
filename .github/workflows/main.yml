@@ -30,26 +30,41 @@ jobs:
           $anydeskExe = "${{ env.ANYDESK_EXE }}"
           $dir = "${{ env.ANYDESK_DIR }}"
           
-          # Verifica se o AnyDesk está instalado
+          # 1. Verifica existência
           if (-not (Test-Path $anydeskExe)) {
               Write-Error "❌ ERRO: AnyDesk não encontrado em $anydeskExe"
               exit 1
           }
 
-          # Limpa processos antigos
-          Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
-          
-          # Define ID Fixo se fornecido
+          # 2. Cria estrutura obrigatória para rodar headless
+          New-Item -ItemType Directory -Force -Path "$dir\data" | Out-Null
+          New-Item -ItemType File -Force -Path "$dir\user.conf" | Out-Null
+
+          # 3. Define ID Fixo se fornecido
           if ("${{ github.event.inputs.anydesk_id }}" -ne "") {
-              Write-Host "Definindo ID Fixo: ${{ github.event.inputs.anydesk_id }}"
+              Write-Host "Configurando ID Fixo..."
               "id=${{ github.event.inputs.anydesk_id }}" | Out-File -FilePath "$dir\user.conf" -Encoding ascii
+          } else {
+              Write-Host "ID aleatório será gerado."
           }
 
-          # INICIA O DAEMON
-          Start-Process $anydeskExe -ArgumentList "--daemon", "--minimized" -WindowStyle Hidden -WorkingDirectory $dir
-          
-          Write-Host "Aguardando inicialização..."
-          Start-Sleep -Seconds 25
+          # 4. Mata qualquer processo órfão
+          Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+          # 5. Inicia via CMD para evitar bloqueios do PowerShell
+          Start-Process cmd.exe -ArgumentList "/c", "`"$anydeskExe`" --daemon" -WindowStyle Hidden
+
+          Write-Host "Aguardando inicialização completa..."
+          Start-Sleep -Seconds 30
+
+          # 6. Validação crítica
+          $pid = Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue
+          if ($pid) {
+              Write-Host "✅ Daemon iniciado com sucesso (PID: $($pid.Id))"
+          } else {
+              Write-Error "❌ FALHA CRÍTICA: O daemon do AnyDesk morreu imediatamente após iniciar."
+              exit 1
+          }
 
       - name: 🔍 Verificar Status
         run: |
