@@ -1,102 +1,165 @@
-name: Windows Cloud PC - AnyDesk Estável (Serviço)
+name: Windows Cloud PC - AnyDesk Daemon Estável
 
 on:
   workflow_dispatch:
+    inputs:
+      anydesk_id:
+        description: 'Seu ID AnyDesk Fixo (deixe vazio para gerar aleatório)'
+        required: false
+        default: ''
 
 jobs:
   build:
-    name: Sistema Reforçado Máximo (Modo Serviço)
+    name: Sistema Reforçado (Daemon + Monitoramento)
     runs-on: windows-latest
     
     env:
-      PROCESSOR_COUNT: 8
-      OPENGL: "1"
-      GITHUB_PRESERVE_WORKFLOW: true
-      MEMORY_GB: 16
+      ANYDESK_DIR: "${{ runner.temp }}\\AnyDesk_Portable"
+      ANYDESK_EXE: "${{ runner.temp }}\\AnyDesk_Portable\\AnyDesk.exe"
+      SYSTEM_CONF: "${{ runner.temp }}\\AnyDesk_Portable\\system.conf"
 
     steps:
-      - name: 🚀 Otimização de Energia
+      - name: 🚀 Otimização do Ambiente
         run: |
-          Write-Host "=== OTIMIZANDO SISTEMA ==="
+          # Desativa hibernação e monitor para evitar sleep durante o teste
           powercfg /setactive 8a18e390-3e07-416b-b74f-a028c23a9d0a
           powercfg /change monitor-timeout-ac 0
           powercfg /change standby-timeout-ac 0
+          Write-Host "Ambiente otimizado para uso contínuo."
 
-      - name: 📥 Instalar AnyDesk via Chocolatey
+      - name: 📥 Baixar AnyDesk Portable
         run: |
-          Write-Host "Instalando AnyDesk via Chocolatey..."
-          choco install anydesk -y --no-session
-          Write-Host "Instalação concluída."
-
-      - name: ⚡ Configurar e Iniciar Serviço AnyDesk
-        run: |
-          $anydeskPath = "C:\Program Files (x86)\AnyDesk\AnyDesk.exe"
+          $dir = "${{ env.ANYDESK_DIR }}"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
           
-          # Verifica se o arquivo existe
-          if (-not (Test-Path $anydeskPath)) {
-            Write-Host "ERRO: AnyDesk não encontrado em $anydeskPath"
+          Write-Host "Baixando AnyDesk Portable (Versão Estável)..."
+          # URL oficial do AnyDesk Portable
+          $url = "https://download.anydesk.com/AnyDesk_32bit.exe" 
+          $exePath = "$dir\AnyDesk_Setup.exe"
+          
+          try {
+            Invoke-WebRequest -Uri $url -OutFile $exePath -UseBasicParsing
+            Write-Host "Download concluído com sucesso."
+          } catch {
+            Write-Error "Falha ao baixar AnyDesk: $_"
             exit 1
           }
 
-          Write-Host "Iniciando serviço AnyDesk..."
+      - name: ⚡ Preparar Configurações e Iniciar Daemon
+        run: |
+          # Extrai os arquivos necessários ou usa o exe direto se for portable standalone
+          # A versão 32bit baixada acima é geralmente standalone, mas vamos garantir que o daemon exista
+          $anydeskExe = "${{ env.ANYDESK_EXE }}"
           
-          # Para qualquer instância antiga
+          # Se o arquivo baixado for um instalador (.exe grande), precisamos extrair
+          if ((Get-Item $exePath).Length -gt 5MB) {
+             Write-Host "Extraindo executável portable do instalador..."
+             Start-Process $exePath -ArgumentList "/VERYSILENT /NORESTART /SUPPRESSMSGBOXES /DIR=`"$dir`"" -Wait
+             $anydeskExe = "$dir\AnyDesk.exe"
+          }
+
+          # Configurar porta padrão (443 é mais seguro através de firewalls, mas 7070 é nativo)
+          # Vamos usar a porta padrão 7070 para máxima compatibilidade interna
+          Write-Host "Iniciando AnyDesk em modo Daemon..."
+          
+          # Limpa processos antigos
           Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
           
-          # Inicia o AnyDesk no modo serviço/daemon para ser mais leve e estável
-          Start-Process $anydeskPath -ArgumentList "--service" -WindowStyle Hidden
-          
-          # Aguarda o serviço registrar
-          Start-Sleep -Seconds 15
-          
-          # Verifica se o processo está vivo
-          if (Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue) {
-            Write-Host "AnyDesk serviço iniciado com sucesso."
-          } else {
-            Write-Host "Alerta: Processo AnyDesk não encontrado. Tentando reiniciar..."
-            Start-Process $anydeskPath -WindowStyle Hidden
+          # Define ID Fixo se fornecido
+          if ("${{ github.event.inputs.anydesk_id }}" -ne "") {
+              Write-Host "Definindo ID Fixo: ${{ github.event.inputs.anydesk_id }}"
+              # Cria user.conf para fixar o ID
+              "id=${{ github.event.inputs.anydesk_id }}" | Out-File -FilePath "$dir\user.conf" -Encoding ascii
           }
 
-      - name: 🛡️ Monitoramento Inteligente
+          # INICIA O DAEMON
+          # --daemon: roda em segundo plano
+          # --minimized: não tenta renderizar GUI
+          Start-Process $anydeskExe -ArgumentList "--daemon", "--minimized" -WindowStyle Hidden -WorkingDirectory $dir
+          
+          Write-Host "Aguardando inicialização do serviço..."
+          Start-Sleep -Seconds 25
+
+      - name: 🔍 Verificar Status e Obter ID
         run: |
-          Write-Host "Monitoramento ativo..."
-          while ($true) {
-            $anydesk = Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue
-            
-            # Se o processo morreu, reinicia
-            if (-not $anydesk -or $anydesk.HasExited) {
-              Write-Host "Reiniciando AnyDesk..."
-              Start-Process "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" -WindowStyle Hidden
-              Start-Sleep -Seconds 10
-            }
-            
-            # Opcional: Verificar se a porta 7070 está ouvindo (porta padrão AnyDesk)
-            # Isso garante que o serviço está realmente aceitando conexões
-            try {
-              $tcpClient = New-Object System.Net.Sockets.TcpClient
-              $connect = $tcpClient.BeginConnect("127.0.0.1", 7070, $null, $null)
-              $timeout = $connect.AsyncWaitHandle.WaitOne(2000, $false)
-              if (!$timeout) {
-                Write-Host "Porta 7070 não respondendo. Reiniciando serviço..."
-                Stop-Process -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 5
-                Start-Process "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" -WindowStyle Hidden
+          $pid = Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue
+          
+          if ($pid) {
+              Write-Host "✅ AnyDesk Daemon está RODANDO (PID: $($pid.Id))"
+              
+              # Tenta ler o ID atual
+              $configFile = "${{ env.ANYDESK_DIR }}\user.conf"
+              if (Test-Path $configFile) {
+                  $content = Get-Content $configFile
+                  if ($content -match "id=(.+)") {
+                      $id = $matches[1]
+                      Write-Host "🆔 Seu AnyDesk ID é: $id"
+                      echo "ANYDESK_ID=$id" >> $env:GITHUB_OUTPUT
+                  } else {
+                      Write-Host "⚠️ ID não encontrado no config ainda. Aguarde conexão."
+                  }
               } else {
-                $tcpClient.Close()
+                   Write-Host "⚠️ Arquivo de configuração não gerado ainda."
               }
-            } catch {
-              Write-Host "Erro na verificação da porta."
-            }
-
-            Start-Sleep -Seconds 30
+          } else {
+              Write-Host "❌ ERRO: Processo AnyDesk não iniciou corretamente."
+              exit 1
           }
 
-      - name: ⏳ Manter Ativo
+      - name: 🛡️ Monitoramento Contínuo (Loop Infinito)
         run: |
-          Write-Host "Mantendo sistema ativo..."
+          Write-Host "=== INICIANDO MONITORAMENTO DE ALTA DISPONIBILIDADE ==="
+          
+          while ($true) {
+              $process = Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue
+              $portOpen = $false
+              
+              # 1. Verifica se o processo existe
+              if (-not $process -or $process.HasExited) {
+                  Write-Host "⚠️ Processo AnyDesk caiu. Reiniciando..."
+                  Start-Sleep -Seconds 5
+                  Start-Process "${{ env.ANYDESK_EXE }}" -ArgumentList "--daemon", "--minimized" -WindowStyle Hidden -WorkingDirectory "${{ env.ANYDESK_DIR }}"
+                  Start-Sleep -Seconds 10
+                  continue
+              }
+
+              # 2. Verifica se a porta 7070 está ouvindo (Indicador real de saúde)
+              try {
+                  $tcpClient = New-Object System.Net.Sockets.TcpClient
+                  $connect = $tcpClient.BeginConnect("127.0.0.1", 7070, $null, $null)
+                  $timeout = $connect.AsyncWaitHandle.WaitOne(2000, $false)
+                  
+                  if ($timeout) {
+                      $portOpen = $true
+                      $tcpClient.Close()
+                  }
+              } catch {
+                  # Ignora erros de rede momentâneos
+              }
+
+              if (-not $portOpen) {
+                  Write-Host "⚠️ Porta 7070 não respondendo. Reiniciando serviço..."
+                  Stop-Process -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
+                  Start-Sleep -Seconds 5
+                  Start-Process "${{ env.ANYDESK_EXE }}" -ArgumentList "--daemon", "--minimized" -WindowStyle Hidden -WorkingDirectory "${{ env.ANYDESK_DIR }}"
+              } else {
+                  Write-Host "✅ AnyDesk está saudável e conectado na porta 7070."
+              }
+
+              # Espera antes da próxima verificação
+              Start-Sleep -Seconds 30
+          }
+
+      - name: ⏳ Manter Ativo (Heartbeat)
+        run: |
+          Write-Host "Mantendo o runner ativo por 7 dias..."
+          # Loop simples para manter o job vivo enquanto o monitor roda
           Start-Sleep -Seconds 604800
 
-      - name: 🧹 Limpeza
+      - name: 🧹 Limpeza Final
         if: always()
         run: |
-          Write-Host "Limpeza finalizada."
+          # Para suavemente antes de destruir
+          Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Remove-Item "${{ env.ANYDESK_DIR }}" -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "Limpeza finalizada. Recursos liberados."
