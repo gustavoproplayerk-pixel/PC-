@@ -13,8 +13,8 @@ jobs:
     name: Sistema Reforçado (Daemon + Monitoramento)
     runs-on: windows-latest
     
-    # Variáveis simples sem interpolação complexa para evitar erros de parsing
     env:
+      # Camho fixo para evitar erros de variável de runner
       ANYDESK_DIR: "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\AnyDesk_Portable"
       ANYDESK_EXE: "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\AnyDesk_Portable\\AnyDesk.exe"
 
@@ -32,6 +32,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           
           Write-Host "Baixando AnyDesk Portable..."
+          # Usando o link de download oficial mais recente
           $url = "https://download.anydesk.com/AnyDesk_32bit.exe" 
           $exePath = "$dir\AnyDesk_Setup.exe"
           
