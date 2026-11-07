@@ -14,7 +14,6 @@ jobs:
     runs-on: windows-latest
     
     env:
-      # Camho fixo para evitar erros de variável de runner
       ANYDESK_DIR: "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\AnyDesk_Portable"
       ANYDESK_EXE: "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\AnyDesk_Portable\\AnyDesk.exe"
 
@@ -32,7 +31,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           
           Write-Host "Baixando AnyDesk Portable..."
-          # Usando o link de download oficial mais recente
           $url = "https://download.anydesk.com/AnyDesk_32bit.exe" 
           $exePath = "$dir\AnyDesk_Setup.exe"
           
@@ -49,23 +47,19 @@ jobs:
           $anydeskExe = "${{ env.ANYDESK_EXE }}"
           $dir = "${{ env.ANYDESK_DIR }}"
           
-          # Se o arquivo for grande, é instalador, então extrai
           if ((Get-Item $exePath).Length -gt 5MB) {
              Write-Host "Extraindo executável..."
              Start-Process $exePath -ArgumentList "/VERYSILENT /NORESTART /SUPPRESSMSGBOXES /DIR=`"$dir`"" -Wait
              $anydeskExe = "$dir\AnyDesk.exe"
           }
 
-          # Limpa processos antigos
           Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
           
-          # Define ID Fixo se fornecido
           if ("${{ github.event.inputs.anydesk_id }}" -ne "") {
               Write-Host "Definindo ID Fixo: ${{ github.event.inputs.anydesk_id }}"
               "id=${{ github.event.inputs.anydesk_id }}" | Out-File -FilePath "$dir\user.conf" -Encoding ascii
           }
 
-          # INICIA O DAEMON
           Start-Process $anydeskExe -ArgumentList "--daemon", "--minimized" -WindowStyle Hidden -WorkingDirectory $dir
           
           Write-Host "Aguardando inicialização..."
