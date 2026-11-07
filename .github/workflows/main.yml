@@ -1,4 +1,4 @@
-name: Windows Cloud PC - AnyDesk (Sem Download)
+name: Windows Cloud PC - AnyDesk (Instalação Automática)
 
 on:
   workflow_dispatch:
@@ -16,6 +16,7 @@ jobs:
     env:
       ANYDESK_DIR: "C:\\Program Files (x86)\\AnyDesk"
       ANYDESK_EXE: "C:\\Program Files (x86)\\AnyDesk\\AnyDesk.exe"
+      ANYDESK_INSTALLER: "C:\\Temp\\AnyDesk_Setup.exe"
 
     steps:
       - name: 🚀 Otimização do Ambiente
@@ -25,18 +26,41 @@ jobs:
           powercfg /change standby-timeout-ac 0
           Write-Host "Ambiente otimizado."
 
+      - name: ⬇️ Baixar AnyDesk
+        run: |
+          # URL oficial do instalador de 32 bits (geralmente mais leve para servidores)
+          $url = "https://download.anydesk.com/AnyDesk_32bit.exe"
+          Write-Host "Baixando AnyDesk..."
+          Invoke-WebRequest -Uri $url -OutFile "${{ env.ANYDESK_INSTALLER }}"
+          if (Test-Path "${{ env.ANYDESK_INSTALLER }}") {
+              Write-Host "Download concluído."
+          } else {
+              Exit 1
+          }
+
+      - name: ⚙️ Instalar AnyDesk Silenciosamente
+        run: |
+          $installer = "${{ env.ANYDESK_INSTALLER }}"
+          $dir = "${{ env.ANYDESK_DIR }}"
+          
+          Write-Host "Instalando AnyDesk..."
+          Start-Process $installer -ArgumentList "/SILENT", "/NORESTART", "/D=$dir" -Wait
+          
+          # Limpa o instalador
+          Remove-Item $installer -Force -ErrorAction SilentlyContinue
+          
+          if (-not (Test-Path "${{ env.ANYDESK_EXE }}")) {
+              Write-Error "❌ Instalação falhou: Executável não encontrado."
+              exit 1
+          }
+          Write-Host "✅ AnyDesk instalado com sucesso."
+
       - name: ⚡ Preparar e Iniciar Daemon
         run: |
           $anydeskExe = "${{ env.ANYDESK_EXE }}"
           $dir = "${{ env.ANYDESK_DIR }}"
           
-          # Verifica se o AnyDesk está instalado
-          if (-not (Test-Path $anydeskExe)) {
-              Write-Error "❌ ERRO: AnyDesk não encontrado em $anydeskExe"
-              exit 1
-          }
-
-          # Limpa processos antigos
+          # Limpa processos antigos caso tenha restado algo
           Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
           
           # Define ID Fixo se fornecido
@@ -45,6 +69,7 @@ jobs:
               Set-Content -Path "$dir\user.conf" -Value "id=${{ github.event.inputs.anydesk_id }}" -Encoding ascii
           } else {
               Write-Host "Gerando ID Aleatório..."
+              # Garante que user.conf não exista para forçar geração nova
               if (Test-Path "$dir\user.conf") {
                   Remove-Item "$dir\user.conf" -Force
               }
@@ -73,6 +98,7 @@ jobs:
                   }
               }
 
+              # Tenta pegar ID gerado automaticamente se não foi fixado
               if ("${{ github.event.inputs.anydesk_id }}" -eq "" -and $retrievedId -eq "") {
                   Start-Sleep -Seconds 5
                   if (Test-Path $configFile) {
@@ -96,7 +122,6 @@ jobs:
       - name: 🛡️ Monitoramento Contínuo (7 Dias)
         run: |
           Write-Host "=== MONITORAMENTO ATIVO (Alvo: 7 Dias) ==="
-          # 7 dias = 604.800 segundos. Como o loop roda a cada ~10s, são 60.480 loops.
           $maxLoops = 60480 
           $loopCount = 0
           
@@ -105,7 +130,6 @@ jobs:
               $process = Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue
               $portOpen = $false
               
-              # 1. Verifica se o processo existe
               if (-not $process -or $process.HasExited) {
                   Write-Host "⚠️ [Loop $loopCount/$maxLoops] Processo não encontrado. Reiniciando..."
                   Start-Sleep -Seconds 5
@@ -114,7 +138,6 @@ jobs:
                   continue
               }
 
-              # 2. Verifica se a porta 7070 está aberta
               try {
                   $tcpClient = New-Object System.Net.Sockets.TcpClient
                   $connect = $tcpClient.BeginConnect("127.0.0.1", 7070, $null, $null)
@@ -132,7 +155,6 @@ jobs:
                   Start-Process "${{ env.ANYDESK_EXE }}" -ArgumentList "--daemon", "--minimized" -WindowStyle Hidden -WorkingDirectory "${{ env.ANYDESK_DIR }}"
                   Start-Sleep -Seconds 10
               } else {
-                  # Log leve a cada 1 hora (aproximadamente 360 loops) para não spammar
                   if ($loopCount % 360 -eq 0) {
                       Write-Host "✅ [Loop $loopCount/$maxLoops] AnyDesk está saudável (1h passada)."
                   }
