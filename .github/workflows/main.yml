@@ -1,4 +1,4 @@
-name: Windows Cloud PC - AnyDesk Daemon Estável
+name: Windows Cloud PC - AnyDesk (Sem Download)
 
 on:
   workflow_dispatch:
@@ -14,8 +14,8 @@ jobs:
     runs-on: windows-latest
     
     env:
-      ANYDESK_DIR: "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\AnyDesk_Portable"
-      ANYDESK_EXE: "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\AnyDesk_Portable\\AnyDesk.exe"
+      ANYDESK_DIR: "C:\\Program Files (x86)\\AnyDesk"
+      ANYDESK_EXE: "C:\\Program Files (x86)\\AnyDesk\\AnyDesk.exe"
 
     steps:
       - name: 🚀 Otimização do Ambiente
@@ -25,41 +25,27 @@ jobs:
           powercfg /change standby-timeout-ac 0
           Write-Host "Ambiente otimizado."
 
-      - name: 📥 Baixar AnyDesk Portable
-        run: |
-          $dir = "${{ env.ANYDESK_DIR }}"
-          New-Item -ItemType Directory -Force -Path $dir | Out-Null
-          
-          Write-Host "Baixando AnyDesk Portable..."
-          $url = "https://download.anydesk.com/AnyDesk_32bit.exe" 
-          $exePath = "$dir\AnyDesk_Setup.exe"
-          
-          try {
-            Invoke-WebRequest -Uri $url -OutFile $exePath -UseBasicParsing
-            Write-Host "Download concluído."
-          } catch {
-            Write-Error "Falha ao baixar AnyDesk: $_"
-            exit 1
-          }
-
       - name: ⚡ Preparar e Iniciar Daemon
         run: |
           $anydeskExe = "${{ env.ANYDESK_EXE }}"
           $dir = "${{ env.ANYDESK_DIR }}"
           
-          if ((Get-Item $exePath).Length -gt 5MB) {
-             Write-Host "Extraindo executável..."
-             Start-Process $exePath -ArgumentList "/VERYSILENT /NORESTART /SUPPRESSMSGBOXES /DIR=`"$dir`"" -Wait
-             $anydeskExe = "$dir\AnyDesk.exe"
+          # Verifica se o AnyDesk está instalado
+          if (-not (Test-Path $anydeskExe)) {
+              Write-Error "❌ ERRO: AnyDesk não encontrado em $anydeskExe"
+              exit 1
           }
 
+          # Limpa processos antigos
           Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
           
+          # Define ID Fixo se fornecido
           if ("${{ github.event.inputs.anydesk_id }}" -ne "") {
               Write-Host "Definindo ID Fixo: ${{ github.event.inputs.anydesk_id }}"
               "id=${{ github.event.inputs.anydesk_id }}" | Out-File -FilePath "$dir\user.conf" -Encoding ascii
           }
 
+          # INICIA O DAEMON
           Start-Process $anydeskExe -ArgumentList "--daemon", "--minimized" -WindowStyle Hidden -WorkingDirectory $dir
           
           Write-Host "Aguardando inicialização..."
@@ -132,5 +118,4 @@ jobs:
         if: always()
         run: |
           Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
-          Remove-Item "${{ env.ANYDESK_DIR }}" -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host "Limpeza finalizada."
