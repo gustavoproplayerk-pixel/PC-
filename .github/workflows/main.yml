@@ -1,89 +1,102 @@
-name: Windows Cloud PC - AnyDesk Ultra Power (Auto-Config)
+name: Windows Cloud PC - AnyDesk Estável (Serviço)
 
 on:
   workflow_dispatch:
-    inputs:
-      duration_minutes:
-        description: 'Duração máxima da sessão (minutos)'
-        required: false
-        default: '10080' # 7 dias padrão
 
 jobs:
   build:
-    name: Sistema Reforçado Máximo (Otimizado)
-    # ⚠️ ALTERADO: Usa os servidores padrão do GitHub para funcionar imediatamente
-    runs-on: windows-latest 
+    name: Sistema Reforçado Máximo (Modo Serviço)
+    runs-on: windows-latest
     
     env:
       PROCESSOR_COUNT: 8
       OPENGL: "1"
       GITHUB_PRESERVE_WORKFLOW: true
       MEMORY_GB: 16
-      ANYDESK_VERSION: "latest"
-      
+
     steps:
-      - name: 🚀 Otimização de Energia e Verificação
+      - name: 🚀 Otimização de Energia
         run: |
-          Write-Host "=== OTIMIZANDO SISTEMA PARA MÁXIMA PERFORMANCE ==="
-          
-          # Força o plano de energia para Alto Desempenho (evita lentidão na conexão AnyDesk)
+          Write-Host "=== OTIMIZANDO SISTEMA ==="
           powercfg /setactive 8a18e390-3e07-416b-b74f-a028c23a9d0a
           powercfg /change monitor-timeout-ac 0
           powercfg /change standby-timeout-ac 0
-          powercfg /change disk-timeout-ac 0
-          
-          Write-Host "CPU Detectada:"
-          Get-CimInstance Win32_Processor | Select Name, NumberOfCores
-          
-          Write-Host "RAM Disponível:"
-          $ram = Get-CimInstance Win32_OperatingSystem
-          Write-Host "Total: $([math]::Round($ram.TotalVisibleMemorySize/1MB)) GB"
 
-      - name: 📥 Baixar e Instalar Essenciais
+      - name: 📥 Instalar AnyDesk via Chocolatey
         run: |
-          Write-Host "Baixando dependências..."
-          Invoke-WebRequest -Uri "https://www.dropbox.com/scl/fi/7eiczvgil84czu55dxep3/Downloads.bat?rlkey=wzdc1wxjsph2b7r0atplmdz3p&dl=1" -OutFile "Downloads.bat" -UseBasicParsing
-          cmd /c Downloads.bat
+          Write-Host "Instalando AnyDesk via Chocolatey..."
+          choco install anydesk -y --no-session
           Write-Host "Instalação concluída."
 
-      - name: ⚡ Iniciar AnyDesk
+      - name: ⚡ Configurar e Iniciar Serviço AnyDesk
         run: |
-          if (Test-Path "start.bat") {
-            Write-Host "Iniciando AnyDesk..."
-            cmd /c start.bat
-            # Aguarda inicialização completa dos serviços
-            Start-Sleep -Seconds 15
-          } else {
-            Write-Host "ERRO: Arquivo start.bat não encontrado — verifique o download."
+          $anydeskPath = "C:\Program Files (x86)\AnyDesk\AnyDesk.exe"
+          
+          # Verifica se o arquivo existe
+          if (-not (Test-Path $anydeskPath)) {
+            Write-Host "ERRO: AnyDesk não encontrado em $anydeskPath"
             exit 1
           }
 
-      - name: 🛡️ Monitoramento Contínuo e Reinício Automático
+          Write-Host "Iniciando serviço AnyDesk..."
+          
+          # Para qualquer instância antiga
+          Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
+          
+          # Inicia o AnyDesk no modo serviço/daemon para ser mais leve e estável
+          Start-Process $anydeskPath -ArgumentList "--service" -WindowStyle Hidden
+          
+          # Aguarda o serviço registrar
+          Start-Sleep -Seconds 15
+          
+          # Verifica se o processo está vivo
+          if (Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue) {
+            Write-Host "AnyDesk serviço iniciado com sucesso."
+          } else {
+            Write-Host "Alerta: Processo AnyDesk não encontrado. Tentando reiniciar..."
+            Start-Process $anydeskPath -WindowStyle Hidden
+          }
+
+      - name: 🛡️ Monitoramento Inteligente
         run: |
-          Write-Host "Monitoramento iniciado. Reinícios automáticos ativados."
+          Write-Host "Monitoramento ativo..."
           while ($true) {
             $anydesk = Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue
             
-            # Se o processo não existe ou fechou sozinho
+            # Se o processo morreu, reinicia
             if (-not $anydesk -or $anydesk.HasExited) {
               Write-Host "Reiniciando AnyDesk..."
-              cmd /c start.bat
+              Start-Process "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" -WindowStyle Hidden
               Start-Sleep -Seconds 10
             }
             
-            # Verifica a cada 60 segundos
-            Start-Sleep -Seconds 60
+            # Opcional: Verificar se a porta 7070 está ouvindo (porta padrão AnyDesk)
+            # Isso garante que o serviço está realmente aceitando conexões
+            try {
+              $tcpClient = New-Object System.Net.Sockets.TcpClient
+              $connect = $tcpClient.BeginConnect("127.0.0.1", 7070, $null, $null)
+              $timeout = $connect.AsyncWaitHandle.WaitOne(2000, $false)
+              if (!$timeout) {
+                Write-Host "Porta 7070 não respondendo. Reiniciando serviço..."
+                Stop-Process -Name "AnyDesk" -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 5
+                Start-Process "C:\Program Files (x86)\AnyDesk\AnyDesk.exe" -WindowStyle Hidden
+              } else {
+                $tcpClient.Close()
+              }
+            } catch {
+              Write-Host "Erro na verificação da porta."
+            }
+
+            Start-Sleep -Seconds 30
           }
 
-      - name: ⏳ Manter Sistema Ativo
+      - name: ⏳ Manter Ativo
         run: |
-          $duration = "${{ github.event.inputs.duration_minutes }}"
-          if ([string]::IsNullOrWhiteSpace($duration)) { $duration = 10080 }
-          Write-Host "Mantendo sistema ativo por $duration minutos..."
-          Start-Sleep -Seconds ($duration * 60)
+          Write-Host "Mantendo sistema ativo..."
+          Start-Sleep -Seconds 604800
 
-      - name: 🧹 Limpeza Segura
+      - name: 🧹 Limpeza
         if: always()
         run: |
-          Remove-Item Downloads.bat -Force -ErrorAction SilentlyContinue
           Write-Host "Limpeza finalizada."
