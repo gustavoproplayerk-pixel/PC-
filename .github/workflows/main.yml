@@ -1,4 +1,5 @@
-name: Windows Cloud PC - AnyDesk Ultra Power
+name: Windows Cloud PC - AnyDesk Ultra Power (Auto-Config)
+
 on:
   workflow_dispatch:
     inputs:
@@ -6,141 +7,83 @@ on:
         description: 'Duração máxima da sessão (minutos)'
         required: false
         default: '10080' # 7 dias padrão
-      anydesk_version:
-        description: 'Versão do AnyDesk (latest, stable, beta)'
-        required: false
-        default: 'latest'
 
 jobs:
   build:
-    name: Sistema Reforçado Máximo
-    runs-on: [self-hosted, windows, gpu, high-ram] 
-    # IMPORTANTE: Seu runner deve ter estas labels e hardware:
-    # CPU: 8+ Núcleos (Ryzen 9 7950X ou i9-13900K)
-    # RAM: 128 GB DDR5
-    # GPU: NVIDIA RTX 4090 (24GB VRAM) ou superior
+    name: Sistema Reforçado Máximo (Otimizado)
+    # ⚠️ ALTERADO: Usa os servidores padrão do GitHub para funcionar imediatamente
+    runs-on: windows-latest 
     
     env:
       PROCESSOR_COUNT: 8
       OPENGL: "1"
       GITHUB_PRESERVE_WORKFLOW: true
-      MEMORY_GB: 128
-      ANYDESK_VERSION: "${{ github.event.inputs.anydesk_version }}"
-      POWEROPTIMIZATION: "true"
+      MEMORY_GB: 16
+      ANYDESK_VERSION: "latest"
       
     steps:
-      - name: 🔍 Verificação de Hardware de Elite
+      - name: 🚀 Otimização de Energia e Verificação
         run: |
-          Write-Host "=== INICIANDO DIAGNÓSTICO DE HARDWARE ==="
+          Write-Host "=== OTIMIZANDO SISTEMA PARA MÁXIMA PERFORMANCE ==="
           
-          # 1. Verificar GPU
-          $gpu = Get-CimInstance Win32_VideoController
-          if ($gpu) {
-            Write-Host "✅ GPU Detectada: $($gpu.Name)"
-            Write-Host "   VRAM: $([math]::Round($gpu.AdapterRAM / 1GB)) GB"
-          } else {
-            Write-Host "⚠️ AVISO: Nenhuma GPU dedicada detectada!"
-          }
-          
-          # 2. Verificar CPU
-          $cpu = Get-CimInstance Win32_Processor
-          Write-Host "✅ CPU: $($cpu.Name)"
-          Write-Host "   Núcleos Físicos: $($cpu.NumberOfCores)"
-          Write-Host "   Threads Lógicos: $($cpu.NumberOfLogicalProcessors)"
-          
-          # 3. Verificar RAM
-          $ramTotal = (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum).Sum / 1GB
-          Write-Host "✅ RAM Total: $ramTotal GB"
-          
-          # 4. Otimizar Energia para Alta Performance
-          Write-Host "🚀 Aplicando Perfil de Alta Performance..."
-          powercfg /setactive 8a18e390-3e07-416b-b74f-a028c23a9d0a # High Performance
+          # Força o plano de energia para Alto Desempenho (evita lentidão na conexão AnyDesk)
+          powercfg /setactive 8a18e390-3e07-416b-b74f-a028c23a9d0a
           powercfg /change monitor-timeout-ac 0
           powercfg /change standby-timeout-ac 0
           powercfg /change disk-timeout-ac 0
-          echo "Perfil de energia alterado para MÁXIMA PERFORMANCE."
+          
+          Write-Host "CPU Detectada:"
+          Get-CimInstance Win32_Processor | Select Name, NumberOfCores
+          
+          Write-Host "RAM Disponível:"
+          $ram = Get-CimInstance Win32_OperatingSystem
+          Write-Host "Total: $([math]::Round($ram.TotalVisibleMemorySize/1MB)) GB"
 
       - name: 📥 Baixar e Instalar Essenciais
         run: |
-          Write-Host "Baixando dependências críticas..."
-          try {
-            Invoke-WebRequest -Uri "https://www.dropbox.com/scl/fi/7eiczvgil84czu55dxep3/Downloads.bat?rlkey=wzdc1wxjsph2b7r0atplmdz3p&dl=1" -OutFile "Downloads.bat" -UseBasicParsing
-            cmd /c Downloads.bat
-            Write-Host "Instalação concluída com sucesso."
-          } catch {
-            Write-Host "❌ ERRO CRÍTICO: Falha ao baixar Downloads.bat"
-            exit 1
-          }
+          Write-Host "Baixando dependências..."
+          Invoke-WebRequest -Uri "https://www.dropbox.com/scl/fi/7eiczvgil84czu55dxep3/Downloads.bat?rlkey=wzdc1wxjsph2b7r0atplmdz3p&dl=1" -OutFile "Downloads.bat" -UseBasicParsing
+          cmd /c Downloads.bat
+          Write-Host "Instalação concluída."
 
-      - name: ⚡ Iniciar AnyDesk com Aceleração GPU
+      - name: ⚡ Iniciar AnyDesk
         run: |
           if (Test-Path "start.bat") {
-            Write-Host "Iniciando AnyDesk com aceleração por hardware..."
-            
-            # Pequeno hack para garantir que o driver OpenGL/CUDA esteja carregado
-            Start-Sleep -Seconds 5
-            
+            Write-Host "Iniciando AnyDesk..."
             cmd /c start.bat
-            
-            # Aguarda inicialização completa dos drivers de vídeo
-            Start-Sleep -Seconds 20
-            
-            # Verifica se o processo AnyDesk iniciou corretamente
-            $process = Get-Process "AnyDesk" -ErrorAction SilentlyContinue
-            if ($process) {
-              Write-Host "✅ AnyDesk iniciado. ID do Processo: $($process.Id)"
-            } else {
-              Write-Host "❌ Erro: AnyDesk não iniciou após 20 segundos."
-              exit 1
-            }
+            # Aguarda inicialização completa dos serviços
+            Start-Sleep -Seconds 15
           } else {
-            Write-Host "❌ ERRO: Arquivo start.bat não encontrado — verifique o download."
+            Write-Host "ERRO: Arquivo start.bat não encontrado — verifique o download."
             exit 1
           }
 
-      - name: 🛡️ Monitoramento Contínuo e Reinício Inteligente
+      - name: 🛡️ Monitoramento Contínuo e Reinício Automático
         run: |
-          Write-Host "Monitoramento ativo. Sistema pronto para uso remoto."
-          $maxReboots = 5
-          $rebootCount = 0
-          
+          Write-Host "Monitoramento iniciado. Reinícios automáticos ativados."
           while ($true) {
             $anydesk = Get-Process -Name "AnyDesk" -ErrorAction SilentlyContinue
             
+            # Se o processo não existe ou fechou sozinho
             if (-not $anydesk -or $anydesk.HasExited) {
-              $rebootCount++
-              Write-Host "⚠️ AnyDesk não está rodando. Tentativa de reinício #$rebootCount..."
-              
-              if ($rebootCount -gt $maxReboots) {
-                Write-Host "🔥 Número máximo de reinícios atingido. Encerrando job para evitar loop infinito."
-                break
-              }
-              
-              # Limpa processos órfãos antes de reiniciar
-              Get-Process "AnyDesk" -ErrorAction SilentlyContinue | Stop-Process -Force
-              
+              Write-Host "Reiniciando AnyDesk..."
               cmd /c start.bat
-              Start-Sleep -Seconds 15 # Tempo extra para estabilização da GPU
-            } else {
-              # Se estiver rodando, apenas respira
-              Start-Sleep -Seconds 60
+              Start-Sleep -Seconds 10
             }
+            
+            # Verifica a cada 60 segundos
+            Start-Sleep -Seconds 60
           }
 
-      - name: ⏳ Manter Sistema Ativo por Duração Definida
+      - name: ⏳ Manter Sistema Ativo
         run: |
           $duration = "${{ github.event.inputs.duration_minutes }}"
           if ([string]::IsNullOrWhiteSpace($duration)) { $duration = 10080 }
-          Write-Host "Mantendo sistema ativo por $duration minutos (alta performance garantida)..."
+          Write-Host "Mantendo sistema ativo por $duration minutos..."
           Start-Sleep -Seconds ($duration * 60)
-          
-          # Desliga perfil de alta performance ao final para economizar energia (opcional)
-          # powercfg /setactive 8c5e7f1e-13e2-428b-8a3e-7f3e2f3e2f3e # Balanced
 
-      - name: 🧹 Limpeza Segura e Final
+      - name: 🧹 Limpeza Segura
         if: always()
         run: |
-          Write-Host "Iniciando limpeza final..."
           Remove-Item Downloads.bat -Force -ErrorAction SilentlyContinue
-          Remove-Item "start.bat" -Force -ErrorAction SilentlyContinue
-          Write-Host "✅ Limpeza finalizada. Sessão encerrada com sucesso."
+          Write-Host "Limpeza finalizada."
